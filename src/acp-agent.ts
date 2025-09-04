@@ -96,7 +96,7 @@ export class ClaudeAcpAgent implements Agent {
     this.client = client;
     this.toolUseCache = {};
     this.fileContentCache = {};
-    
+
     // Bind all methods to ensure they're properly accessible to ACP library
     this.initialize = this.initialize.bind(this);
     this.newSession = this.newSession.bind(this);
@@ -142,21 +142,21 @@ export class ClaudeAcpAgent implements Agent {
         // This is a simplified approach - you may need to adjust based on how claude command handles MCP
         mcpEnvVars[`MCP_${server.name.toUpperCase()}_COMMAND`] = server.command;
         if (server.args) {
-          mcpEnvVars[`MCP_${server.name.toUpperCase()}_ARGS`] = server.args.join(' ');
+          mcpEnvVars[`MCP_${server.name.toUpperCase()}_ARGS`] = server.args.join(" ");
         }
       }
     }
 
     const server = await createMcpServer(this, sessionId, this.clientCapabilities);
     const address = server.address() as AddressInfo;
-    
+
     // Configure the ACP MCP server for Claude CLI
     const acpMcpConfig = {
       type: "http",
       url: `http://127.0.0.1:${address.port}/mcp`,
       headers: {
-        "x-acp-proxy-session-id": sessionId
-      }
+        "x-acp-proxy-session-id": sessionId,
+      },
     };
 
     this.sessions[sessionId] = {
@@ -193,37 +193,37 @@ export class ClaudeAcpAgent implements Agent {
     // Add current user message to conversation history
     const userMessage: ConversationMessage = {
       role: "user",
-      content: params.prompt.map(chunk => {
+      content: params.prompt.map((chunk) => {
         switch (chunk.type) {
           case "text":
             return { type: "text", text: chunk.text };
           case "image":
             return {
               type: "image",
-              source: chunk.data 
+              source: chunk.data
                 ? { type: "base64", data: chunk.data, media_type: chunk.mimeType }
-                : { type: "url", url: chunk.uri }
+                : { type: "url", url: chunk.uri },
             };
           default:
             return { type: "text", text: JSON.stringify(chunk) };
         }
-      })
+      }),
     };
-    
+
     session.conversationHistory.push(userMessage);
 
     // Spawn a new Claude process for this prompt with conversation context
     const claudeArgs = [
-      '--print',
-      '--input-format=stream-json',
-      '--output-format=stream-json',
-      '--verbose'
+      "--print",
+      "--input-format=stream-json",
+      "--output-format=stream-json",
+      "--verbose",
     ];
 
     // Add allowed/disallowed tools based on client capabilities
     const allowedTools = [];
     const disallowedTools = [];
-    
+
     if (this.clientCapabilities?.fs?.readTextFile) {
       allowedTools.push("mcp__acp__read");
       disallowedTools.push("Read");
@@ -238,23 +238,23 @@ export class ClaudeAcpAgent implements Agent {
     }
 
     if (allowedTools.length > 0) {
-      claudeArgs.push('--allowed-tools', allowedTools.join(','));
+      claudeArgs.push("--allowed-tools", allowedTools.join(","));
     }
     if (disallowedTools.length > 0) {
-      claudeArgs.push('--disallowed-tools', disallowedTools.join(','));
+      claudeArgs.push("--disallowed-tools", disallowedTools.join(","));
     }
 
-    // Add MCP servers configuration  
-    const mcpServers: any = { 
+    // Add MCP servers configuration
+    const mcpServers: any = {
       acp: {
         type: "http",
         url: session.mcpServerUrl,
         headers: {
-          "x-acp-proxy-session-id": params.sessionId
-        }
-      }
+          "x-acp-proxy-session-id": params.sessionId,
+        },
+      },
     };
-    
+
     // Also add any user-provided MCP servers from session creation
     if (Array.isArray(session.userMcpServers)) {
       for (const server of session.userMcpServers) {
@@ -262,23 +262,25 @@ export class ClaudeAcpAgent implements Agent {
           type: "stdio",
           command: server.command,
           args: server.args,
-          env: server.env ? Object.fromEntries(server.env.map((e: any) => [e.name, e.value])) : undefined
+          env: server.env
+            ? Object.fromEntries(server.env.map((e: any) => [e.name, e.value]))
+            : undefined,
         };
       }
     }
-    
-    claudeArgs.push('--mcp-config', JSON.stringify({ mcpServers }));
+
+    claudeArgs.push("--mcp-config", JSON.stringify({ mcpServers }));
 
     // Prepare environment
     const claudeEnv = {
       ...process.env,
-      ...session.mcpEnvVars
+      ...session.mcpEnvVars,
     };
-    
+
     // Remove API key env vars to use logged-in session
     delete claudeEnv.ANTHROPIC_API_KEY;
     delete claudeEnv.CLAUDE_API_KEY;
-    
+
     // Ensure Claude auth env vars are present
     if (process.env.CLAUDE_CODE_OAUTH_TOKEN) {
       claudeEnv.CLAUDE_CODE_OAUTH_TOKEN = process.env.CLAUDE_CODE_OAUTH_TOKEN;
@@ -289,26 +291,28 @@ export class ClaudeAcpAgent implements Agent {
     if (process.env.CLAUDECODE) {
       claudeEnv.CLAUDECODE = process.env.CLAUDECODE;
     }
-    
-    console.error(`Spawning Claude with conversation history (${session.conversationHistory.length} messages)`);
-    
-    const claudeProcess = spawn('claude', claudeArgs, {
-      stdio: ['pipe', 'pipe', 'pipe'],
+
+    console.error(
+      `Spawning Claude with conversation history (${session.conversationHistory.length} messages)`,
+    );
+
+    const claudeProcess = spawn("claude", claudeArgs, {
+      stdio: ["pipe", "pipe", "pipe"],
       env: claudeEnv,
-      cwd: session.cwd
+      cwd: session.cwd,
     });
 
     return new Promise((resolve, reject) => {
-      let outputBuffer = '';
+      let outputBuffer = "";
       let hasReceivedResult = false;
       let isResolved = false;
       let assistantMessage: ConversationMessage | null = null;
 
       const cleanup = () => {
-        claudeProcess.stdout?.removeAllListeners('data');
-        claudeProcess.stderr?.removeAllListeners('data');
-        claudeProcess.removeAllListeners('error');
-        claudeProcess.removeAllListeners('exit');
+        claudeProcess.stdout?.removeAllListeners("data");
+        claudeProcess.stderr?.removeAllListeners("data");
+        claudeProcess.removeAllListeners("error");
+        claudeProcess.removeAllListeners("exit");
         if (!claudeProcess.killed) {
           claudeProcess.kill();
         }
@@ -339,35 +343,35 @@ export class ClaudeAcpAgent implements Agent {
       const handleOutput = (data: Buffer) => {
         const dataStr = data.toString();
         outputBuffer += dataStr;
-        
+
         // Process complete JSON lines
-        const lines = outputBuffer.split('\n');
-        outputBuffer = lines.pop() || '';
+        const lines = outputBuffer.split("\n");
+        outputBuffer = lines.pop() || "";
 
         for (const line of lines) {
           if (!line.trim()) continue;
-          
+
           try {
             const message = JSON.parse(line);
             this.handleClaudeMessage(message, params.sessionId, safeResolve, safeReject);
-            
-            if (message.type === 'result') {
+
+            if (message.type === "result") {
               hasReceivedResult = true;
-            } else if (message.type === 'assistant' && !assistantMessage) {
+            } else if (message.type === "assistant" && !assistantMessage) {
               // Capture the assistant message for history
               assistantMessage = {
                 role: "assistant",
-                content: message.message.content
+                content: message.message.content,
               };
             }
           } catch (error) {
-            console.error('Failed to parse Claude output:', line, error);
+            console.error("Failed to parse Claude output:", line, error);
           }
         }
       };
 
       const handleError = (error: Error) => {
-        console.error('Claude process error:', error);
+        console.error("Claude process error:", error);
         safeReject(error);
       };
 
@@ -381,23 +385,26 @@ export class ClaudeAcpAgent implements Agent {
         }
       };
 
-      claudeProcess.stdout?.on('data', handleOutput);
-      claudeProcess.stderr?.on('data', (data) => {
+      claudeProcess.stdout?.on("data", handleOutput);
+      claudeProcess.stderr?.on("data", (data) => {
         console.error(`Claude stderr: ${data.toString().trim()}`);
       });
-      claudeProcess.on('error', handleError);
-      claudeProcess.on('exit', handleExit);
+      claudeProcess.on("error", handleError);
+      claudeProcess.on("exit", handleExit);
 
       // Send the conversation with history context
       try {
-        const claudeMessage = buildConversationMessage(session.conversationHistory, params.sessionId);
-        const messageJson = JSON.stringify(claudeMessage) + '\n';
+        const claudeMessage = buildConversationMessage(
+          session.conversationHistory,
+          params.sessionId,
+        );
+        const messageJson = JSON.stringify(claudeMessage) + "\n";
         console.error(`Sending to Claude: ${messageJson.trim()}`);
-        
+
         claudeProcess.stdin?.write(messageJson);
         claudeProcess.stdin?.end();
       } catch (error) {
-        console.error('Failed to send message to Claude:', error);
+        console.error("Failed to send message to Claude:", error);
         safeReject(error instanceof Error ? error : new Error(String(error)));
       }
     });
@@ -408,9 +415,9 @@ export class ClaudeAcpAgent implements Agent {
     if (!session) {
       throw new Error("Session not found");
     }
-    
+
     session.cancelled = true;
-    
+
     // Note: In --print mode, each Claude process is short-lived per request,
     // so we just mark the session as cancelled. Active requests will check
     // this flag and terminate gracefully.
@@ -445,17 +452,16 @@ export class ClaudeAcpAgent implements Agent {
         input: null,
       },
       {
-        name: "say-hello", 
+        name: "say-hello",
         description: "Say hello with optional name",
         input: { hint: "[name]" },
-      }
+      },
     ];
   }
 
-
   private async toAcpNotificationsWithPermissions(
     message: any,
-    sessionId: string, 
+    sessionId: string,
     toolUseCache: ToolUseCache,
     fileContentCache: { [key: string]: string },
   ): Promise<SessionNotification[]> {
@@ -469,9 +475,12 @@ export class ClaudeAcpAgent implements Agent {
     }
 
     for (const chunk of chunks) {
-      console.error(`toAcpNotificationsWithPermissions: Processing chunk:`, JSON.stringify(chunk, null, 2));
+      console.error(
+        `toAcpNotificationsWithPermissions: Processing chunk:`,
+        JSON.stringify(chunk, null, 2),
+      );
       let update: SessionNotification["update"] | null = null;
-      
+
       switch (chunk.type) {
         case "text":
           update = {
@@ -510,7 +519,7 @@ export class ClaudeAcpAgent implements Agent {
               entries: planEntries(chunk.input),
             };
           } else {
-            // With --disallowed-tools, Claude will use ACP tool variants (mcp__acp__*) 
+            // With --disallowed-tools, Claude will use ACP tool variants (mcp__acp__*)
             // These are handled by the MCP server and don't need special interception
             update = {
               toolCallId: chunk.id,
@@ -547,7 +556,7 @@ export class ClaudeAcpAgent implements Agent {
         default:
           throw new Error("unhandled chunk type: " + chunk.type);
       }
-      
+
       if (update) {
         output.push({ sessionId, update });
       }
@@ -556,15 +565,14 @@ export class ClaudeAcpAgent implements Agent {
     return output;
   }
 
-
   private async handleClaudeMessage(
     message: any,
     sessionId: string,
     resolve: (value: PromptResponse) => void,
-    reject: (error: Error) => void
+    reject: (error: Error) => void,
   ) {
     console.error(`handleClaudeMessage: Processing message type: ${message.type}`);
-    
+
     if (this.sessions[sessionId]?.cancelled) {
       console.error(`handleClaudeMessage: Session cancelled`);
       resolve({ stopReason: "cancelled" });
@@ -604,8 +612,10 @@ export class ClaudeAcpAgent implements Agent {
       }
       case "user":
       case "assistant": {
-        console.error(`handleClaudeMessage: Assistant/User message - content length: ${message.message?.content?.length}`);
-        
+        console.error(
+          `handleClaudeMessage: Assistant/User message - content length: ${message.message?.content?.length}`,
+        );
+
         // Convert to ACP notifications and send to client
         if (
           message.message?.model === "<synthetic>" &&
@@ -616,9 +626,9 @@ export class ClaudeAcpAgent implements Agent {
           reject(RequestError.authRequired());
           return;
         }
-        
+
         // Note: With persistent processes, conversation history is maintained by Claude itself
-        
+
         console.error(`handleClaudeMessage: Converting to ACP notifications...`);
         const notifications = await this.toAcpNotificationsWithPermissions(
           message,
@@ -626,16 +636,19 @@ export class ClaudeAcpAgent implements Agent {
           this.toolUseCache,
           this.fileContentCache,
         );
-        
+
         console.error(`handleClaudeMessage: Generated ${notifications.length} notifications`);
         for (const notification of notifications) {
-          console.error(`handleClaudeMessage: Sending notification:`, JSON.stringify(notification, null, 2));
+          console.error(
+            `handleClaudeMessage: Sending notification:`,
+            JSON.stringify(notification, null, 2),
+          );
           await this.client.sessionUpdate(notification);
         }
         break;
       }
       default:
-        console.warn('Unknown message type:', message.type);
+        console.warn("Unknown message type:", message.type);
         break;
     }
   }
@@ -644,7 +657,7 @@ export class ClaudeAcpAgent implements Agent {
   private static UNSUPPORTED_COMMANDS = [
     "add-dir",
     "agents",
-    "bashes", 
+    "bashes",
     "bug",
     "clear",
     "compact",
@@ -696,36 +709,42 @@ function formatUriAsLink(uri: string): string {
 }
 
 // Build conversation message with history for Claude command
-function buildConversationMessage(conversationHistory: ConversationMessage[], sessionId: string): ClaudeMessage {
+function buildConversationMessage(
+  conversationHistory: ConversationMessage[],
+  sessionId: string,
+): ClaudeMessage {
   // For --print mode, we send the entire conversation as context
   // The last message should be the current user message
   const lastMessage = conversationHistory[conversationHistory.length - 1];
-  
+
   if (!lastMessage || lastMessage.role !== "user") {
     throw new Error("Expected last message to be from user");
   }
-  
-  // If we have conversation history (more than just the current message), 
+
+  // If we have conversation history (more than just the current message),
   // include it as context
   if (conversationHistory.length > 1) {
-    const historyContext = conversationHistory.slice(0, -1).map(msg => {
-      const roleLabel = msg.role === "user" ? "Human" : "Assistant";
-      const textContent = msg.content
-        .filter(chunk => chunk.type === "text")
-        .map(chunk => chunk.text)
-        .join("\n");
-      return `${roleLabel}: ${textContent}`;
-    }).join("\n\n");
-    
+    const historyContext = conversationHistory
+      .slice(0, -1)
+      .map((msg) => {
+        const roleLabel = msg.role === "user" ? "Human" : "Assistant";
+        const textContent = msg.content
+          .filter((chunk) => chunk.type === "text")
+          .map((chunk) => chunk.text)
+          .join("\n");
+        return `${roleLabel}: ${textContent}`;
+      })
+      .join("\n\n");
+
     // Add history as context to the current message
     const enrichedContent = [
       {
         type: "text",
-        text: `Previous conversation:\n${historyContext}\n\nCurrent request:`
+        text: `Previous conversation:\n${historyContext}\n\nCurrent request:`,
       },
-      ...lastMessage.content
+      ...lastMessage.content,
     ];
-    
+
     return {
       type: "user",
       message: {
@@ -736,7 +755,7 @@ function buildConversationMessage(conversationHistory: ConversationMessage[], se
       parent_tool_use_id: null,
     };
   }
-  
+
   // First message in conversation - send as is
   return {
     type: "user",
@@ -827,7 +846,7 @@ function promptToClaude(prompt: PromptRequest): ClaudeMessage {
  */
 export function toAcpNotifications(
   message: any,
-  sessionId: string, 
+  sessionId: string,
   toolUseCache: ToolUseCache,
   fileContentCache: { [key: string]: string },
 ): SessionNotification[] {
