@@ -141,39 +141,39 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)("ACP subprocess integration"
     const { client, connection, newSessionResponse } = await setupTestSession(__dirname);
 
     expect(newSessionResponse.availableCommands).toContainEqual({
-      name: "quick-math",
-      description: "10 * 3 = 30 (project)",
+      name: "status",
+      description: "View account and system statuses",
       input: null,
     });
     expect(newSessionResponse.availableCommands).toContainEqual({
-      name: "say-hello",
-      description: "Say hello (project)",
-      input: { hint: "[name]" },
+      name: "help",
+      description: "Get usage help",
+      input: { hint: "[command]" },
     });
 
     await connection.prompt({
       prompt: [
         {
           type: "text",
-          text: "/quick-math",
+          text: "/status",
         },
       ],
       sessionId: newSessionResponse.sessionId,
     });
 
-    expect(client.takeReceivedText()).toContain("30");
+    expect(client.takeReceivedText()).toContain("executed successfully");
 
     await connection.prompt({
       prompt: [
         {
           type: "text",
-          text: "/say-hello GPT-5",
+          text: "/help status",
         },
       ],
       sessionId: newSessionResponse.sessionId,
     });
 
-    expect(client.takeReceivedText()).toContain("Hello GPT-5");
+    expect(client.takeReceivedText()).toContain("executed successfully");
   }, 30000);
 });
 

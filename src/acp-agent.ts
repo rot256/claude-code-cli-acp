@@ -190,6 +190,17 @@ export class ClaudeAcpAgent implements Agent {
 
     session.cancelled = false;
 
+    // Check if this is a slash command
+    const textContent = params.prompt
+      .filter((chunk) => chunk.type === "text")
+      .map((chunk) => (chunk as any).text)
+      .join(" ")
+      .trim();
+
+    if (textContent.startsWith("/")) {
+      return this.handleSlashCommand(textContent, params.sessionId, session);
+    }
+
     // Add current user message to conversation history
     const userMessage: ConversationMessage = {
       role: "user",
@@ -444,19 +455,239 @@ export class ClaudeAcpAgent implements Agent {
   }
 
   private getBasicCommands(): AvailableCommand[] {
-    // Return basic commands for now - you can expand this
+    // Return all Claude Code CLI slash commands for forwarding
     return [
       {
-        name: "quick-math",
-        description: "Perform quick math calculations",
+        name: "add-dir",
+        description: "Add additional working directories",
+        input: { hint: "[directory_path]" },
+      },
+      {
+        name: "agents",
+        description: "Manage custom AI subagents",
+        input: { hint: "[subcommand]" },
+      },
+      {
+        name: "bug",
+        description: "Report bugs to Anthropic",
+        input: { hint: "[description]" },
+      },
+      {
+        name: "clear",
+        description: "Clear conversation history",
         input: null,
       },
       {
-        name: "say-hello",
-        description: "Say hello with optional name",
-        input: { hint: "[name]" },
+        name: "compact",
+        description: "Compact conversation with optional instructions",
+        input: { hint: "[instructions]" },
+      },
+      {
+        name: "config",
+        description: "View/modify configuration",
+        input: { hint: "[key=value]" },
+      },
+      {
+        name: "cost",
+        description: "Show token usage statistics",
+        input: null,
+      },
+      {
+        name: "doctor",
+        description: "Check Claude Code installation health",
+        input: null,
+      },
+      {
+        name: "help",
+        description: "Get usage help",
+        input: { hint: "[command]" },
+      },
+      {
+        name: "init",
+        description: "Initialize project with CLAUDE.md guide",
+        input: null,
+      },
+      {
+        name: "login",
+        description: "Switch Anthropic accounts",
+        input: null,
+      },
+      {
+        name: "logout",
+        description: "Sign out from Anthropic account",
+        input: null,
+      },
+      {
+        name: "mcp",
+        description: "Manage MCP server connections",
+        input: { hint: "[subcommand]" },
+      },
+      {
+        name: "memory",
+        description: "Edit CLAUDE.md memory files",
+        input: { hint: "[action]" },
+      },
+      {
+        name: "model",
+        description: "Select or change AI model",
+        input: { hint: "[model_name]" },
+      },
+      {
+        name: "permissions",
+        description: "View or update permissions",
+        input: { hint: "[action]" },
+      },
+      {
+        name: "pr_comments",
+        description: "View pull request comments",
+        input: { hint: "[pr_number]" },
+      },
+      {
+        name: "review",
+        description: "Request code review",
+        input: { hint: "[options]" },
+      },
+      {
+        name: "status",
+        description: "View account and system statuses",
+        input: null,
+      },
+      {
+        name: "terminal-setup",
+        description: "Install Shift+Enter key binding",
+        input: null,
       },
     ];
+  }
+
+  private async handleSlashCommand(
+    commandText: string,
+    sessionId: string,
+    session: Session,
+  ): Promise<PromptResponse> {
+    const commandParts = commandText.split(" ");
+    const commandName = commandParts[0].substring(1); // Remove the '/' prefix
+    const commandArgs = commandParts.slice(1);
+
+    // Prepare environment for Claude CLI
+    const claudeEnv = {
+      ...process.env,
+      ...session.mcpEnvVars,
+    };
+
+    // Remove API key env vars to use logged-in session
+    delete claudeEnv.ANTHROPIC_API_KEY;
+    delete claudeEnv.CLAUDE_API_KEY;
+
+    // Ensure Claude auth env vars are present
+    if (process.env.CLAUDE_CODE_OAUTH_TOKEN) {
+      claudeEnv.CLAUDE_CODE_OAUTH_TOKEN = process.env.CLAUDE_CODE_OAUTH_TOKEN;
+    }
+    if (process.env.CLAUDE_CODE_ENTRYPOINT) {
+      claudeEnv.CLAUDE_CODE_ENTRYPOINT = process.env.CLAUDE_CODE_ENTRYPOINT;
+    }
+    if (process.env.CLAUDECODE) {
+      claudeEnv.CLAUDECODE = process.env.CLAUDECODE;
+    }
+
+    console.error(`Executing Claude slash command: /${commandName} ${commandArgs.join(" ")}`);
+
+    // Execute the Claude command with the slash command
+    const claudeArgs = [`/${commandName}`, ...commandArgs];
+    
+    const claudeProcess = spawn("claude", claudeArgs, {
+      stdio: ["pipe", "pipe", "pipe"],
+      env: claudeEnv,
+      cwd: session.cwd,
+    });
+
+    return new Promise((resolve, reject) => {
+      let outputBuffer = "";
+      let errorBuffer = "";
+      let isResolved = false;
+
+      const cleanup = () => {
+        claudeProcess.stdout?.removeAllListeners("data");
+        claudeProcess.stderr?.removeAllListeners("data");
+        claudeProcess.removeAllListeners("error");
+        claudeProcess.removeAllListeners("exit");
+        if (!claudeProcess.killed) {
+          claudeProcess.kill();
+        }
+      };
+
+      const safeResolve = (response: PromptResponse) => {
+        if (!isResolved) {
+          isResolved = true;
+          cleanup();
+          resolve(response);
+        }
+      };
+
+      const safeReject = (error: Error) => {
+        if (!isResolved) {
+          isResolved = true;
+          cleanup();
+          reject(error);
+        }
+      };
+
+      const handleOutput = (data: Buffer) => {
+        outputBuffer += data.toString();
+      };
+
+      const handleError = (data: Buffer) => {
+        errorBuffer += data.toString();
+      };
+
+      const handleExit = async (code: number | null, signal: string | null) => {
+        if (!isResolved) {
+          // Send the command output as a text message to the client
+          let responseText = "";
+          
+          if (errorBuffer.trim()) {
+            responseText += `Error: ${errorBuffer.trim()}\n`;
+          }
+          
+          if (outputBuffer.trim()) {
+            responseText += outputBuffer.trim();
+          } else if (!errorBuffer.trim()) {
+            responseText = `Command /${commandName} executed successfully.`;
+          }
+
+          // Send the result as a session update
+          await this.client.sessionUpdate({
+            sessionId,
+            update: {
+              sessionUpdate: "agent_message_chunk",
+              content: {
+                type: "text",
+                text: responseText,
+              },
+            },
+          });
+
+          if (code === 0) {
+            safeResolve({ stopReason: "end_turn" });
+          } else {
+            safeResolve({ stopReason: "end_turn" });
+          }
+        }
+      };
+
+      const handleProcessError = (error: Error) => {
+        console.error("Claude process error:", error);
+        safeReject(error);
+      };
+
+      claudeProcess.stdout?.on("data", handleOutput);
+      claudeProcess.stderr?.on("data", handleError);
+      claudeProcess.on("error", handleProcessError);
+      claudeProcess.on("exit", handleExit);
+
+      // Close stdin as slash commands typically don't need input
+      claudeProcess.stdin?.end();
+    });
   }
 
   private async toAcpNotificationsWithPermissions(
